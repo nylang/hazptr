@@ -1,0 +1,10 @@
+import "stdlib:stdlib.ny";
+import "hazptr:hazptr.ny";
+
+func main() -> int32 {
+  let domain = HazardDomain.New(1, Allocator.ProcessHeap(0i64, 0i64)).get_if<HazardDomain>()!;
+  var acquired = domain.Acquire();
+  var holder = move(acquired.get_if<HazardHolder>()!);
+  let duplicate = copy(holder);
+  return duplicate.Pending();
+}

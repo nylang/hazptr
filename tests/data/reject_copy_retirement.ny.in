@@ -1,0 +1,8 @@
+import "hazptr:hazptr.ny";
+
+func main() -> int32 {
+  let retirement = HazardRetirement{address: 1up, reclaim: lambda() -> void {
+  }};
+  let duplicate = copy(retirement);
+  return duplicate.address == 1up ? 0 : 1;
+}

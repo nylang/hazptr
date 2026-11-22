@@ -1,0 +1,78 @@
+// Copyright (c) 2026 tangxiangjiang
+// SPDX-License-Identifier: MIT
+
+import "stdlib:stdlib.ny";
+import "hazptr:hazptr.ny";
+
+struct ConsumerCounts {
+  reclaimed: Atomic<int32>;
+  dropped: Atomic<int32>;
+}
+
+struct ConsumerObject {
+  value: int32;
+  counts: arc<ConsumerCounts>;
+}
+
+method(ConsumerObject) operator drop() -> void {
+  self.counts.dropped.FetchAdd(1, MemoryOrder.Relaxed);
+}
+
+static method(ConsumerObject) Publish(source: ref mut HazardSource, counts: arc<ConsumerCounts>) -> HazardRetirement {
+  let object = new arc<ConsumerObject>{value: 42, counts: counts};
+  let address = (&mut object.value) as uintptr;
+  source.Store(address);
+
+  return HazardRetirement{address: address, reclaim: lambda[copy object]() -> void {
+    object.counts.reclaimed.FetchAdd(1, MemoryOrder.Relaxed);
+  }};
+}
+
+func main() -> int32 {
+  let created = HazardDomain.New(2, Allocator.ProcessHeap(0i64, 0i64), retire_threshold: 1);
+  if created.IsErr() {
+    return 1;
+  }
+
+  let domain = created.get_if<HazardDomain>()!;
+  var first = domain.Acquire();
+  var second = domain.Acquire();
+  if first.IsErr() || second.IsErr() {
+    return 2;
+  }
+
+  var reader = move(first.get_if<HazardHolder>()!);
+  var writer = move(second.get_if<HazardHolder>()!);
+  let counts = new arc<ConsumerCounts>{};
+  var source = HazardSource.New(0up);
+  let retirement = ConsumerObject.Publish(source, counts);
+  scope (reader) {
+    let address = reader.Protect(source);
+    if address == 0up || source.Exchange(0up) != address {
+      return 3;
+    }
+
+    unsafe {
+      var admission = writer.TryRetire(move(retirement));
+      if admission.IsErr() {
+        reader.Reset();
+        return 4;
+      }
+
+      if *(address as *const int32) != 42 {
+        return 5;
+      }
+    }
+
+    if writer.Collect() != 0 || counts.dropped.Load(MemoryOrder.Relaxed) != 0 {
+      return 6;
+    }
+  }
+
+  if writer.Collect() != 1 || counts.reclaimed.Load(MemoryOrder.Relaxed) != 1
+    || counts.dropped.Load(MemoryOrder.Relaxed) != 1 {
+    return 7;
+  }
+
+  return 0;
+}

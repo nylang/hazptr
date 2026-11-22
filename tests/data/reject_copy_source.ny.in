@@ -1,0 +1,7 @@
+import "hazptr:hazptr.ny";
+
+func main() -> int32 {
+  var source = HazardSource.New(0up);
+  let duplicate = copy(source);
+  return duplicate.Load() == 0up ? 0 : 1;
+}
