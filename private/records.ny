@@ -3,6 +3,16 @@
 
 part of HazardReclamation;
 
+/** @brief Construct a retirement using an address/context callback.
+ * @returns Move-only deferred action; a named callback does not allocate a capture environment.
+ * @note The caller pins context and pointee storage until reclamation, including domain final
+ *       destruction. This borrows context; it does not invent or recover allocation ownership. */
+pub static method(HazardRetirement) WithContext(
+  address: uintptr, context: *mut uint8, reclaim: HazardReclaimFn
+) -> HazardRetirement {
+  return HazardRetirement{address: address, context: context, reclaim_address: move(reclaim), contextual: true};
+}
+
 method(HazardState) IsProtected(address: uintptr) -> bool {
   var index: int32 = 0;
   while index < self.records.length {
@@ -46,7 +56,11 @@ method(HazardRecord) Collect(state: arc<HazardState>) -> int32 {
 static method(HazardRetirement) Run(retirement: HazardRetirement) -> void {
   // Consuming the callback in this frame releases its owner captures before
   // the caller publishes the reclaimed count or makes this record available.
-  retirement.reclaim();
+  if retirement.contextual {
+    retirement.reclaim_address(retirement.address, retirement.context);
+  } else {
+    retirement.reclaim();
+  }
 }
 
 method(HazardState) operator drop() -> void {

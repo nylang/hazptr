@@ -46,6 +46,12 @@ allocator. Retire exactly once. Do not free or reuse a retired node directly.
 The [complete consumer](tests/data/consumer.ny.in) demonstrates ownership transfer,
 protected dereference, unlinking, deferred reclamation and final destruction.
 
+For language-owned node slabs, `HazardRetirement.WithContext(address, context,
+named_callback)` records a borrowed context and passes both addresses to a
+capture-free callback. The slab owner must outlive every retirement, including
+final domain destruction. This avoids per-retirement closure allocation; it
+does not transfer or reconstruct allocation ownership.
+
 Every failed retirement returns `HazardRetireFailure{kind, retirement}`. Keep
 that retirement for retry: dropping an unaccepted callback may release an object
 still being read. Configuration, exhaustion, OOM, capacity overflow, inactive

@@ -14,6 +14,9 @@ pub enum HazardError {
   Reentrant
 }
 
+/** @brief Address/context reclamation slot; a named callback needs no environment allocation. */
+pub typedef HazardReclaimFn = (uintptr, *mut uint8) -> void;
+
 /** @brief An unlinked address paired with ownership-bearing deferred reclamation.
  * @note The callback retains the object's language owner until invoked and released. It must
  *       reclaim only this retirement, be thread safe, and not throw or block indefinitely.
@@ -22,7 +25,18 @@ pub enum HazardError {
 pub struct HazardRetirement {
   address: uintptr;
   reclaim:() -> void;
+  context: *mut uint8;
+  reclaim_address: HazardReclaimFn;
+  contextual: bool;
 }
+
+/** @brief Construct a retirement using an address/context callback.
+ * @returns Move-only deferred action; a named callback does not allocate a capture environment.
+ * @note The caller pins context and pointee storage until reclamation, including domain final
+ *       destruction. This borrows context; it does not invent or recover allocation ownership. */
+pub static method(HazardRetirement) WithContext(
+  address: uintptr, context: *mut uint8, reclaim: HazardReclaimFn
+) -> HazardRetirement;
 
 /** @brief A retirement transfers its callback owner once; duplication is forbidden. */
 pub method(HazardRetirement) operator copy() -> HazardRetirement = delete;

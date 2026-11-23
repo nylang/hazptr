@@ -23,6 +23,10 @@ method(HazardHolder) operator drop() -> void {
   }
 }
 
+/** @brief Load, publish protection and revalidate until the source agrees.
+ * @returns Protected address or zero. Protection lasts until reset, replacement, exit or drop.
+ * @note Uses atomic operations only: no allocation, mutex, ARC acquisition or registration.
+ *       The source's writers must use HazardSource operations and the same reclamation domain. */
 pub method(HazardHolder) Protect(source: ref HazardSource) -> uintptr {
   assert(self.state != nil);
   unsafe {
@@ -39,6 +43,7 @@ pub method(HazardHolder) Protect(source: ref HazardSource) -> uintptr {
   }
 }
 
+/** @brief Stop protecting the current address; it may be reclaimed immediately afterward. */
 pub method(HazardHolder) Reset() -> void {
   if self.state != nil {
     unsafe {
@@ -47,17 +52,25 @@ pub method(HazardHolder) Reset() -> void {
   }
 }
 
+/** @brief Begin a protection region; the same holder must not have nested active scopes. */
 pub method(HazardHolder) Enter() -> void {
   assert(!self.scoped && self.state != nil);
   self.scoped = true;
   self.Reset();
 }
 
+/** @brief End a protection region while retaining the reusable record lease. */
 pub method(HazardHolder) Exit() -> void {
   self.Reset();
   self.scoped = false;
 }
 
+/** @brief Preallocate both retirement buffers before an algorithm unlinks a node.
+ * @returns Ok, InvalidArgument, Inactive, Reentrant, CapacityOverflow or OutOfMemory.
+ * @note Capacity is a total entry reservation. Failure preserves all accepted retirements.
+ *       With distinct retired addresses, max(records + 1, retire_threshold) entries
+ *       cover a collect-on-threshold batch and its protected survivors. This permits
+ *       worker initialization to remove retirement-buffer growth from queue hot paths. */
 pub method(HazardHolder) TryReserveRetirements(capacity: int32) -> Result<Unit, HazardError> {
   if self.state == nil {
     return HazardError.Inactive;
@@ -86,6 +99,11 @@ pub method(HazardHolder) TryReserveRetirements(capacity: int32) -> Result<Unit, 
   return UnitValue();
 }
 
+/** @brief Accept ownership of a valid retirement and collect when its batch reaches the threshold.
+ * @returns Ok after acceptance or the entire unaccepted input on failure.
+ * @note Address is nonzero and already unlinked from all sources in this domain. Reclamation
+ *       may run inline and on another thread after this holder drops. Callers synchronize
+ *       mutable payloads separately. A callback cannot retire recursively through this holder. */
 pub unsafe method(HazardHolder) TryRetire(retirement: HazardRetirement) -> Result<Unit, HazardRetireFailure> {
   if self.state == nil || retirement.address == 0up {
     let kind = self.state == nil ? HazardError.Inactive : HazardError.InvalidArgument;
@@ -114,6 +132,9 @@ pub unsafe method(HazardHolder) TryRetire(retirement: HazardRetirement) -> Resul
   return UnitValue();
 }
 
+/** @brief Scan this holder's batch and invoke only unprotected retirements.
+ * @returns Number reclaimed. Reentrant collection of the same record returns zero.
+ * @note Scan and callback cost belongs to the retiring thread, not protection readers. */
 pub method(HazardHolder) Collect() -> int32 {
   if self.state == nil {
     return 0;
@@ -125,6 +146,8 @@ pub method(HazardHolder) Collect() -> int32 {
   }
 }
 
+/** @brief Read this holder's retained retirement count, or zero when inactive.
+ * @returns Thread-confined count; no global statistics scan is performed. */
 pub method(HazardHolder) Pending() -> int32 {
   if self.state == nil {
     return 0;

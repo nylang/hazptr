@@ -34,6 +34,13 @@ pub struct HazardDomain {
   scoped: bool;
 }
 
+/** @brief Allocate a caller-sized record slab; no hidden maximum participant count.
+ * @param records Positive maximum number of simultaneously live holders, including collectors.
+ * @param retire_threshold Positive batch trigger; protected survivors may exceed it.
+ * @param allocator Allocator row copied into managed allocations and retirement buffers;
+ *        its borrowed context must outlive all holders and final reclamation.
+ * @returns Domain, InvalidArgument or OutOfMemory after checking metadata allocation.
+ * @note Buffer growth during retirement is checked and returns unaccepted ownership on OOM. */
 pub static method(HazardDomain) New(
   records: int32, allocator: Allocator, { retire_threshold: int32 = 64 }
 ) -> Result<HazardDomain, HazardError> {
@@ -69,6 +76,9 @@ pub static method(HazardDomain) New(
   return HazardDomain{state: state};
 }
 
+/** @brief Lease one reusable thread-confined record; registration does not affect existing readers.
+ * @returns Move-only holder or NoRecords; an inert domain returns Inactive.
+ * @note Reuses retired storage from the previous lease and may reclaim its safe entries. */
 pub method(HazardDomain) Acquire() -> Result<HazardHolder, HazardError> {
   if self.state == nil {
     return HazardError.Inactive;
@@ -92,6 +102,9 @@ pub method(HazardDomain) Acquire() -> Result<HazardHolder, HazardError> {
   return HazardError.NoRecords;
 }
 
+/** @brief Collect retirements from currently unleased records without waiting for active holders.
+ * @returns Number reclaimed by this call. Active holders collect their own batches.
+ * @note Safe with concurrent registration and collection. Callbacks execute without a domain lock. */
 pub method(HazardDomain) Collect() -> int64 {
   if self.state == nil {
     return 0i64;
@@ -116,6 +129,8 @@ pub method(HazardDomain) Collect() -> int64 {
   return reclaimed;
 }
 
+/** @brief Read configured simultaneous-holder capacity, or zero for an inert domain.
+ * @returns Record capacity; not a reservation. */
 pub method(HazardDomain) Capacity() -> int32 {
   return self.state == nil ? 0 : (self.state as arc<HazardState>).records.length;
 }

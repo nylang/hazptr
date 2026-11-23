@@ -45,6 +45,40 @@ method(HazardDomain) TestHolder() -> HazardHolder {
   return move(result.get_if<HazardHolder>()!);
 }
 
+// nyra-lint-allow: prefer-type-owned-functions -- Tests the capture-free retirement ABI and borrowed context.
+func hazard_test_context_reclaim(address: uintptr, context: *mut uint8) -> void {
+  unsafe {
+    let value = address as *mut int32;
+    let calls = context as *mut int32;
+    AssertEqI32(*value, 42);
+    *calls += 1;
+  }
+}
+
+@test
+func test_hazptr_context_callback_waits_for_protection_and_runs_once() {
+  let domain = HazardDomain.New(2, Allocator.ProcessHeap(0i64, 0i64), retire_threshold: 1).get_if<HazardDomain>()!;
+  var reader = domain.TestHolder();
+  var writer = domain.TestHolder();
+  AssertTrue(writer.TryReserveRetirements(3).IsOk());
+  var value: int32 = 42;
+  var calls: int32 = 0;
+  var source = HazardSource.New((&mut value) as uintptr);
+  AssertTrue(reader.Protect(source) == (&mut value) as uintptr);
+  source.Store(0up);
+  unsafe {
+    AssertTrue(writer.TryRetire(HazardRetirement.WithContext((&mut value) as uintptr,
+      (&mut calls) as *mut uint8, hazard_test_context_reclaim)).IsOk());
+  }
+
+  AssertEqI32(calls, 0);
+  AssertEqI32(writer.Pending(), 1);
+  reader.Reset();
+  AssertEqI32(writer.Collect(), 1);
+  AssertEqI32(writer.Collect(), 0);
+  AssertEqI32(calls, 1);
+}
+
 static method(HazardTestObject) EarlyReturn(domain: HazardDomain, source: ref HazardSource) -> void {
   var holder = domain.TestHolder();
   scope (holder) {
@@ -256,7 +290,9 @@ func test_hazptr_reclaim_callback_can_acquire_and_collect_another_record() {
   let counts = new arc<HazardTestCounts>{};
   let object = new arc<HazardTestObject>{value: 15, counts: counts};
   unsafe {
-    AssertTrue(holder.TryRetire(HazardRetirement{address: object.Address(), reclaim: lambda[copy domain, copy object]() -> void {
+    AssertTrue(holder.TryRetire(HazardRetirement{address: object.Address(), reclaim: lambda[
+      copy domain, copy object
+    ]() -> void {
       var other = domain.TestHolder();
       AssertEqI64(domain.Collect(), 0i64);
       object.Reclaim();

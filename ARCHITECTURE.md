@@ -34,6 +34,12 @@ mutex. A callback can keep its own object alive through an ordinary ARC capture
 containing move-only fields; the final compiler-generated drop remains the only
 owner of typed destruction and allocator-paired deallocation.
 
+A capture-free retirement alternatively stores an address, a borrowed context
+and a named callback. It allocates no capture environment. The caller retains
+the original slab/context owner until every retirement has run, including final
+domain destruction. This path only schedules reuse or caller-defined cleanup;
+it never infers an allocation header or manufactures language ownership.
+
 The allocator row is copied into managed blocks and buffers; its context remains
 borrowed and must outlive all domain and holder handles. Initial allocation and
 buffer growth have explicit failure admission. Retired nodes are not raw heap
